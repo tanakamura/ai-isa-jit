@@ -2,15 +2,11 @@
 #define AI_ISA_JIT_H
 
 #include <CL/cl.h>
+#include "ai-isa-jit/ai-isa-jit-emit.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-
-struct AIISA_ProgramText {
-    
-};
 
 struct AIISA_InnerELF {
     unsigned char *data;
@@ -49,10 +45,8 @@ int aiisa_build_binary_from_cl(struct AIISA_Program *prog,
                                const char *path);
 void aiisa_fini_binary(struct AIISA_Program *prog);
 
-struct AIISA_ProgramText *aiisa_init_text(void);
-
 void aiisa_replace_text(struct AIISA_Program *prog,
-                        struct AIISA_ProgramText *text);
+                        struct AIISA_CodeBuffer *code);
 
 #ifdef __cplusplus
 }

@@ -178,6 +178,66 @@ aiisa_build_binary(struct AIISA_Program *prog, const char *path)
     return 0;
 }
 
+static void
+setup_inner(struct AIISA_Program *prog)
+{
+    unsigned char *base = prog->cl_binary;
+    Elf32_Ehdr *eh = (Elf32_Ehdr*)base;
+    int sh_entsize = eh->e_shentsize;
+    unsigned char *text_contents;
+    int sh_cur = eh->e_shoff;
+
+    sh_cur += sh_entsize * 5;
+    prog->outer_text_shdr_offset = sh_cur;
+    prog->outer_comment_shdr_offset = sh_cur + sh_entsize;
+
+    {
+        Elf32_Shdr *sh = (Elf32_Shdr*)(base + prog->outer_text_shdr_offset);
+        Elf32_Ehdr *inner_ehdr;
+        int inner_sh_cur;
+        int inner_ph_cur;
+
+        text_contents = base + sh->sh_offset;
+
+        write_file("out2.elf", text_contents, sh->sh_size);
+
+
+        prog->inner.size = sh->sh_size;
+        prog->inner.data = (unsigned char*)malloc(sh->sh_size);
+        memcpy(prog->inner.data, text_contents, sh->sh_size);
+        text_contents = prog->inner.data;
+        inner_ehdr = (Elf32_Ehdr*)text_contents;
+
+
+        /*        
+         *   [ 6] .text             PROGBITS        00000000 00262f 000068 00      0   0  0  (これ)
+         *   [ 7] .data             PROGBITS        00000000 002697 001280 1280      0   0  0
+         *   [ 8] .symtab           SYMTAB          00000000 003917 000060 10      9   1  0
+         *   [ 9] .strtab           STRTAB          00000000 003977 00001b 00      0   0  0
+         */
+        inner_sh_cur = inner_ehdr->e_shoff;
+        inner_sh_cur += inner_ehdr->e_shentsize * 6;
+
+        prog->inner.text_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 0;
+        prog->inner.data_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 1;
+        prog->inner.symtab_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 2;
+        prog->inner.strtab_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 3;;
+
+        /*
+         *  00
+         *  01
+         *  02     .text .data .symtab .strtab
+         *  03
+         *  04     .text .data .symtab .strtab
+         */
+
+        inner_ph_cur = inner_ehdr->e_phoff;
+        inner_ph_cur += inner_ehdr->e_phentsize * 4;
+
+        prog->inner.seg4_phoff = inner_ph_cur;
+    }
+}
+
 
 int
 aiisa_build_binary_from_cl(struct AIISA_Program *prog_ret,
@@ -239,7 +299,9 @@ aiisa_build_binary_from_cl(struct AIISA_Program *prog_ret,
     prog_ret->cl_binary = binary;
 
     clReleaseProgram(prog);
-    prog_ret->orig_prog = prog;
+    //prog_ret->orig_prog = prog;
+
+    setup_inner(prog_ret);
 
     return 0;
 }
@@ -247,71 +309,23 @@ aiisa_build_binary_from_cl(struct AIISA_Program *prog_ret,
 
 void
 aiisa_replace_text(struct AIISA_Program *prog,
-                   struct AIISA_ProgramText *text)
+                   struct AIISA_CodeBuffer *code)
 {
-    unsigned char *base = prog->cl_binary;
-    Elf32_Ehdr *eh = (Elf32_Ehdr*)base;
-    int sh_entsize = eh->e_shentsize;
-    unsigned char *text_contents;
-    int sh_cur = eh->e_shoff;
+    Elf32_Shdr *text;
+    Elf32_Shdr *inner_text;
+    resize_inner_text(&prog->inner, code->cur * 4);
 
-    sh_cur += sh_entsize * 5;
-    prog->outer_text_shdr_offset = sh_cur;
-    prog->outer_comment_shdr_offset = sh_cur + sh_entsize;
+    inner_text = (Elf32_Shdr*)(prog->inner.data + prog->inner.text_shoff);
+    memcpy(prog->inner.data + inner_text->sh_offset, code->buffer, code->cur * 4);
 
-    {
-        Elf32_Shdr *sh = (Elf32_Shdr*)(base + prog->outer_text_shdr_offset);
-        Elf32_Ehdr *inner_ehdr;
-        int inner_sh_cur;
-        int inner_ph_cur;
+    resize_outer_text(prog, prog->inner.size);
 
-        text_contents = base + sh->sh_offset;
-
-        write_file("out2.elf", text_contents, sh->sh_size);
-
-
-        prog->inner.size = sh->sh_size;
-        prog->inner.data = (unsigned char*)malloc(sh->sh_size);
-        memcpy(prog->inner.data, text_contents, sh->sh_size);
-        text_contents = prog->inner.data;
-        inner_ehdr = (Elf32_Ehdr*)text_contents;
-
-
-        /*        
-         *   [ 6] .text             PROGBITS        00000000 00262f 000068 00      0   0  0  (これ)
-         *   [ 7] .data             PROGBITS        00000000 002697 001280 1280      0   0  0
-         *   [ 8] .symtab           SYMTAB          00000000 003917 000060 10      9   1  0
-         *   [ 9] .strtab           STRTAB          00000000 003977 00001b 00      0   0  0
-         */
-        inner_sh_cur = inner_ehdr->e_shoff;
-        inner_sh_cur += inner_ehdr->e_shentsize * 6;
-
-        prog->inner.text_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 0;
-        prog->inner.data_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 1;
-        prog->inner.symtab_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 2;
-        prog->inner.strtab_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 3;;
-
-        /*
-         *  00
-         *  01
-         *  02     .text .data .symtab .strtab
-         *  03
-         *  04     .text .data .symtab .strtab
-         */
-
-        inner_ph_cur = inner_ehdr->e_phoff;
-        inner_ph_cur += inner_ehdr->e_phentsize * 4;
-
-        prog->inner.seg4_phoff = inner_ph_cur;
-    }
-
-    resize_outer_text(prog, 32768);
+    text = (Elf32_Shdr*)(prog->cl_binary + prog->outer_text_shdr_offset);
+    memcpy(prog->cl_binary + text->sh_offset, prog->inner.data, prog->inner.size);
 
     {
         write_file("out3.elf", prog->cl_binary, prog->size);
     }
-
-    resize_inner_text(&prog->inner, 16384);
     {
         write_file("out4.elf", prog->inner.data, prog->inner.size);
     }

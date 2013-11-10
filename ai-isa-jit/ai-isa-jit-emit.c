@@ -33,7 +33,7 @@ aiisa_emit4(struct AIISA_CodeBuffer *buf, uint32_t val)
         buf->buffer = realloc(buf->buffer, buf->size * sizeof(uint32_t));
     }
 
-    printf("%08x: 0x%08x\n", buf->cur*4, val);
+    //printf("%08x: 0x%08x\n", buf->cur*4, val);
     buf->buffer[buf->cur++] = val;
 }
 
@@ -45,7 +45,7 @@ aiisa_emit4x2(struct AIISA_CodeBuffer *buf, uint32_t val0, uint32_t val1)
         buf->buffer = realloc(buf->buffer, buf->size * sizeof(uint32_t));
     }
 
-    printf("%08x: 0x%08x 0x%08x\n", (int)(buf->cur*4), (int)val0, (int)val1);
+    //printf("%08x: 0x%08x 0x%08x\n", (int)(buf->cur*4), (int)val0, (int)val1);
 
     buf->buffer[buf->cur++] = val0;
     buf->buffer[buf->cur++] = val1;

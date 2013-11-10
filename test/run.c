@@ -17,25 +17,21 @@ sec()
 
 
 static void
-gen_code(struct AIISA_Program *prog)
+gen_code(struct AIISA_Program *prog, struct AIISA_CodeBuffer *buf)
 {
-    struct AIISA_CodeBuffer buf;
+    aiisa_code_buffer_reset(buf);
 
-    aiisa_code_buffer_init(&buf);
+    //aiisa_s_endpgm(buf);
 
-    //aiisa_s_endpgm(&buf);
-
-    aiisa_s_buffer_load_dword_immoff(&buf, S(0), S(8), 4);
-    aiisa_s_waitcnt(&buf, LGKMCNT(0));
-    aiisa_v_mov_b32(&buf, V(0), S(0));
-    aiisa_v_mov_b32(&buf, V(1), 129);
-    aiisa_tbuffer_store_format_x(&buf, NFMT_FLOAT, DFMT_32, FLAG_OFFEN, 0,
+    aiisa_s_buffer_load_dword_immoff(buf, S(0), S(12), 0x4);
+    aiisa_s_waitcnt(buf, LGKMCNT(0));
+    aiisa_v_mov_b32(buf, V(0), S(0));
+    aiisa_v_mov_b32(buf, V(1), 129);
+    aiisa_tbuffer_store_format_x(buf, NFMT_FLOAT, DFMT_32, FLAG_OFFEN, 0,
                                  ZERO, 0, S(4), V(1), V(0));
-    aiisa_s_endpgm(&buf);
+    aiisa_s_endpgm(buf);
 
-    aiisa_replace_text(prog, &buf);
-
-    aiisa_code_buffer_fini(&buf);
+    aiisa_replace_text(prog, buf);
 }
 
 int
@@ -56,7 +52,10 @@ main(int argc, char **argv)
     struct AIISA_Program prog;
     cl_command_queue queue;
     int ei;
-    int nloop = 2;
+    int nloop = 16;
+    struct AIISA_CodeBuffer buf;
+
+    aiisa_code_buffer_init(&buf);
 
     clGetPlatformIDs(0, NULL, &num);
 
@@ -129,8 +128,6 @@ main(int argc, char **argv)
 
     aiisa_build_binary_from_cl(&prog, context, gpu_devs[0], input);
 
-    gen_code(&prog);
-
     for (ei=0; ei<nloop; ei++) {
         cl_program cl_prog;
         const unsigned char *bin[1];
@@ -138,19 +135,24 @@ main(int argc, char **argv)
         cl_kernel ker;
         cl_mem in, out;
         size_t global_size[3];
+        double tb, te;
 
+        tb = sec();
+        gen_code(&prog, &buf);
         bin[0] = prog.cl_binary;
         bin_size[0] = prog.size;
-
         cl_prog = clCreateProgramWithBinary(context, 1, gpu_devs, bin_size, bin, NULL, NULL);
         clBuildProgram(cl_prog, 1, gpu_devs, NULL, NULL, NULL);
         ker = clCreateKernel(cl_prog, "f", &err);
+        te = sec();
+        printf("build : %f[usec]\n", (te-tb)*1000000);
 
         in = clCreateBuffer(context, CL_MEM_READ_WRITE, run_size * sizeof(int), NULL, &err);
         out = clCreateBuffer(context, CL_MEM_READ_WRITE, run_size * sizeof(int), NULL, &err);
 
         clSetKernelArg(ker, 0, sizeof(cl_mem), &in);
         clSetKernelArg(ker, 1, sizeof(cl_mem), &out);
+
 
         {
             int *ptr = (int*)clEnqueueMapBuffer(queue, in, CL_TRUE, CL_MAP_WRITE, 0, run_size*sizeof(int), 0, NULL, NULL, NULL);
@@ -182,7 +184,7 @@ main(int argc, char **argv)
             puts("fini");
         }
 
-        {
+        if (ei == 0) {
             int *ptr = (int*)clEnqueueMapBuffer(queue, out, CL_TRUE, CL_MAP_READ, 0, run_size*sizeof(int), 0, NULL, NULL, NULL);
             int i;
             for (i=0; i<run_size; i++) {

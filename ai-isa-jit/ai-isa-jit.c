@@ -199,7 +199,7 @@ setup_inner(struct AIISA_Program *prog)
 
         text_contents = base + sh->sh_offset;
 
-        write_file("out2.elf", text_contents, sh->sh_size);
+        //write_file("out2.elf", text_contents, sh->sh_size);
 
 
         prog->inner.size = sh->sh_size;
@@ -292,7 +292,7 @@ aiisa_build_binary_from_cl(struct AIISA_Program *prog_ret,
     clGetProgramInfo(prog, CL_PROGRAM_BINARIES, sizeof(binary), &binary, &ret_sz);
 
     {
-        write_file("out1.elf", binary, binary_sz[0]);
+        //write_file("out1.elf", binary, binary_sz[0]);
     }
 
     prog_ret->size = binary_sz[0];
@@ -324,10 +324,10 @@ aiisa_replace_text(struct AIISA_Program *prog,
     memcpy(prog->cl_binary + text->sh_offset, prog->inner.data, prog->inner.size);
 
     {
-        write_file("out3.elf", prog->cl_binary, prog->size);
+        //write_file("out3.elf", prog->cl_binary, prog->size);
     }
     {
-        write_file("out4.elf", prog->inner.data, prog->inner.size);
+        //write_file("out4.elf", prog->inner.data, prog->inner.size);
     }
 }
 

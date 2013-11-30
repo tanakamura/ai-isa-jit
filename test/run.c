@@ -34,23 +34,62 @@ sec()
 static void
 gen_code(struct AIISA_Program *prog, struct AIISA_CodeBuffer *buf)
 {
-    int i;
+    int i, j, label0, cur, d;
     aiisa_code_buffer_reset(buf);
 
-    for (i=0; i<100; i++) {
-        aiisa_v_mov_b32(buf, V(1), 129);
+#if 0
+    if (0) {
+    } else {
+        for (i=0; i<16; i++) {
+            aiisa_v_mov_b32(buf, V(0), V(0));
+            aiisa_v_mov_b32(buf, V(1), V(1));
+            aiisa_v_mov_b32(buf, V(2), V(2));
+            aiisa_v_mov_b32(buf, V(3), V(3));
+        }
+    }
+#endif
+    aiisa_s_movk_i32(buf, S(0), 0);
+    aiisa_s_movk_i32(buf, S(1), 10);
+
+    label0 = buf->cur;
+    aiisa_s_addk_i32(buf, S(0), 1);
+
+    /* s8 ‚É‚Í ˆø”‚ª“ü‚Á‚½constantƒƒ‚ƒŠ‚Ö‚Ìƒ|ƒCƒ“ƒ^‚ª“ü‚Á‚Ä‚é */
+
+    for (j=0; j<16; j++) {
+        aiisa_s_buffer_load_dword_immoff(buf, S(3), S(8), 0x4);
+        aiisa_s_waitcnt(buf, LGKMCNT(0));
+        for (i=0; i<8; i++) {
+            aiisa_v_mov_b32(buf, V(0), S(0));
+        }
     }
 
+
+    aiisa_s_cmpk_le_i32(buf, S(0), 16384);
+
+    cur = buf->cur + 1;
+    d = label0-cur;
+    aiisa_s_cbranch_scc1(buf, d);
+
+    aiisa_s_endpgm(buf);
+
 #if 0
+    for (i=0; i<16; i++) {
+        aiisa_v_mov_b32(buf, V(0), V(0));
+        aiisa_v_mov_b32(buf, V(1), V(1));
+        aiisa_v_mov_b32(buf, V(2), V(2));
+        aiisa_v_mov_b32(buf, V(3), V(3));
+    }
+
+
     aiisa_s_buffer_load_dword_immoff(buf, S(0), S(8), 0x4);
     aiisa_s_waitcnt(buf, LGKMCNT(0));
     aiisa_v_mov_b32(buf, V(0), S(0));
     aiisa_v_mov_b32(buf, V(1), 129);
     aiisa_tbuffer_store_format_x(buf, NFMT_FLOAT, DFMT_32, FLAG_OFFEN, 0,
                                  ZERO, 0, S(4), V(1), V(0));
-#endif
-
     aiisa_s_endpgm(buf);
+#endif
 
     aiisa_replace_text(prog, buf);
 }
@@ -75,6 +114,7 @@ main(int argc, char **argv)
     int ei;
     int nloop = 4;
     struct AIISA_CodeBuffer buf;
+    int argidx;
 
     aiisa_code_buffer_init(&buf);
 
@@ -83,7 +123,7 @@ main(int argc, char **argv)
     plat_ids = (cl_platform_id*)malloc(sizeof(*plat_ids) * num);
     clGetPlatformIDs(num, plat_ids, NULL);
 
-    int argidx = 1;
+    argidx = 1;
     while (1) {
         if (argidx >= argc) {
             break;
@@ -208,7 +248,7 @@ main(int argc, char **argv)
 
         err = clFinish(queue);
 
-        global_size[0] = lsize[ei] * 2;
+        global_size[0] = lsize[ei] * 8 ;
         local_size[0] = lsize[ei];
         err = clEnqueueNDRangeKernel(queue, ker, 1, NULL, global_size, local_size, 0, NULL, NULL);
         if (err != CL_SUCCESS) {

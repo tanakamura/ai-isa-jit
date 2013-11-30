@@ -31,7 +31,33 @@ aiisa_emit_sopp(struct AIISA_CodeBuffer *buffer, unsigned int opc, unsigned int 
     uint32_t val = 0;
     val |= 0xbf800000;
     val |= opc << 16;
+    val |= (imm16&0xffff);
+
+    aiisa_emit4(buffer, val);
+}
+
+static __inline void
+aiisa_emit_sopk(struct AIISA_CodeBuffer *buffer, unsigned int opc,
+                unsigned int sdst, unsigned int imm16)
+{
+    uint32_t val = 0;
+    val |= 0xb0000000;
+    val |= opc << 23;
+    val |= sdst << 16;
     val |= imm16;
+
+    aiisa_emit4(buffer, val);
+}
+
+static __inline void
+aiisa_emit_sopc(struct AIISA_CodeBuffer *buffer, unsigned int opc,
+                unsigned int ssrc1, unsigned int ssrc0)
+{
+    uint32_t val = 0;
+    val |= 0x17e << 23;
+    val |= opc << 16;
+    val |= ssrc1 << 8;
+    val |= ssrc0 << 8;
 
     aiisa_emit4(buffer, val);
 }
@@ -164,6 +190,18 @@ aiisa_s_waitcnt(struct AIISA_CodeBuffer *buffer, int cnt)
 {
     aiisa_emit_sopp(buffer, 12, cnt);
 }
+static __inline void
+aiisa_s_cbranch_scc0(struct AIISA_CodeBuffer *buffer, int simm)
+{
+    aiisa_emit_sopp(buffer, 4, simm);
+}
+
+static __inline void
+aiisa_s_cbranch_scc1(struct AIISA_CodeBuffer *buffer, int simm)
+{
+    aiisa_emit_sopp(buffer, 5, simm);
+}
+
 
 static __inline void
 aiisa_v_mov_b32(struct AIISA_CodeBuffer *buffer,
@@ -173,6 +211,60 @@ aiisa_v_mov_b32(struct AIISA_CodeBuffer *buffer,
     aiisa_emit_vop1(buffer, vdst, 1, src);
 }
 
+static __inline void
+aiisa_s_addk_i32(struct AIISA_CodeBuffer *buffer,
+                 unsigned int sdst,
+                 unsigned int imm)
+{
+    aiisa_emit_sopk(buffer, 15, sdst, imm);
+}
+
+static __inline void
+aiisa_s_movk_i32(struct AIISA_CodeBuffer *buffer,
+                 unsigned int sdst,
+                 unsigned int imm)
+{
+    aiisa_emit_sopk(buffer, 0, sdst, imm);
+}
+static __inline void
+aiisa_s_cmpk_lt_i32(struct AIISA_CodeBuffer *buffer,
+                    unsigned int sdst,
+                    unsigned int imm)
+{
+    aiisa_emit_sopk(buffer, 7, sdst, imm);
+}
+static __inline void
+aiisa_s_cmpk_le_i32(struct AIISA_CodeBuffer *buffer,
+                    unsigned int sdst,
+                    unsigned int imm)
+{
+    aiisa_emit_sopk(buffer, 8, sdst, imm);
+}
+
+
+
+static __inline void
+aiisa_s_cmp_gt_i32(struct AIISA_CodeBuffer *buffer,
+                   unsigned int ssrc1,
+                   unsigned int ssrc0)
+{
+    aiisa_emit_sopc(buffer, 2, ssrc1, ssrc0);
+}
+
+static __inline void
+aiisa_s_cmp_eq_i32(struct AIISA_CodeBuffer *buffer,
+                   unsigned int ssrc1,
+                   unsigned int ssrc0)
+{
+    aiisa_emit_sopc(buffer, 0, ssrc1, ssrc0);
+}
+static __inline void
+aiisa_s_cmp_le_i32(struct AIISA_CodeBuffer *buffer,
+                   unsigned int ssrc1,
+                   unsigned int ssrc0)
+{
+    aiisa_emit_sopc(buffer, 5, ssrc1, ssrc0);
+}
 
 static __inline void
 aiisa_s_buffer_load_dword_regoff(struct AIISA_CodeBuffer *buffer,

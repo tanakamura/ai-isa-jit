@@ -100,7 +100,7 @@ resize_inner_text(struct AIISA_InnerELF *inner, int new_section_size)
     strtab->sh_offset += dsize;
 
 
-#ifdef _WIN32
+#if 0
     seg2 = (Elf32_Phdr*)(new_buffer + inner->seg2_phoff);
 
     seg2->p_memsz += dsize;
@@ -172,11 +172,12 @@ read_file(unsigned char **ret_data,
     }
 
     size = st_buf.st_size;
-    buffer=(unsigned char*)malloc(size);
-    fd = open(path, O_RDONLY);
+    buffer=(unsigned char*)malloc(size + 1);
+    fd = open(path, _O_BINARY | O_RDONLY);
     read(fd, buffer, size);
     close(fd);
 
+    buffer[size] = '\0';
     *ret_data = buffer;
     *ret_size = size;
 
@@ -257,7 +258,7 @@ setup_inner(struct AIISA_Program *prog)
         text_contents = prog->inner.data;
         inner_ehdr = (Elf32_Ehdr*)text_contents;
 
-#ifdef _WIN32
+#if 0
         /*
          *  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
          *  [ 0]                   NULL            00000000 000000 000000 00      0   0  0
@@ -285,7 +286,7 @@ setup_inner(struct AIISA_Program *prog)
         prog->inner.symtab_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 2;
         prog->inner.strtab_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 3;;
 
-#ifdef _WIN32
+#if 0
         /*
          *   Segment Sections...
          *    00     
@@ -355,10 +356,10 @@ aiisa_build_binary_from_cl(struct AIISA_Program *prog_ret,
     err = clBuildProgram(prog, 1, &dev, "-save-temps -fbin-exe -fno-bin-llvmir -fno-bin-source -fno-bin-amdil", NULL, NULL);
 
     if (err != CL_SUCCESS) {
-        char log[1024];
+        char log[16384];
         size_t ret;
         puts("build pro");
-        err = clGetProgramBuildInfo(prog, dev, CL_PROGRAM_BUILD_LOG, 1024, log, &ret);
+        err = clGetProgramBuildInfo(prog, dev, CL_PROGRAM_BUILD_LOG, 16384, log, &ret);
         printf("%d %s\n", err, log);
         return -1;
     }
@@ -394,7 +395,7 @@ aiisa_replace_text(struct AIISA_Program *prog,
     resize_inner_text(&prog->inner, code->cur * 4);
 
     inner_text = (Elf32_Shdr*)(prog->inner.data + prog->inner.text_shoff);
-    //memcpy(prog->inner.data + inner_text->sh_offset, code->buffer, code->cur * 4);
+    memcpy(prog->inner.data + inner_text->sh_offset, code->buffer, code->cur * 4);
 
     resize_outer_text(prog, prog->inner.size);
 

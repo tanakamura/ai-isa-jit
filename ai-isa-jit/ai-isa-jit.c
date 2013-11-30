@@ -1,18 +1,29 @@
 #include <fcntl.h>
-#include <unistd.h>
+
+#include <sys/types.h>
 #include <sys/stat.h>
-#include <elf.h>
+#include <stdlib.h>
+
+#include "ai-isa-jit/elfdef.h"
+
+#ifdef _WIN32
+#define stat _stat
+#define open _open
+#define read _read
+#else
+#include <unistd.h>
+#endif
 #include <string.h>
 #include <stdio.h>
 
 #include "ai-isa-jit/ai-isa-jit.h"
 
 /*
+ * 
+ * セクションヘッダ: (linux)
  * セグメント4
  * セクション6
  *  に入ってる
- * 
- * セクションヘッダ:
  *   [番] 名前              タイプ          アドレス Off    サイズ ES Flg Lk Inf Al
  *   [ 0]                   NULL            00000000 000000 000000 00      0   0  0
  *   [ 1] .shstrtab         STRTAB          00000000 0000fc 000028 00      0   0  0
@@ -24,12 +35,29 @@
  *   [ 7] .data             PROGBITS        00000000 002697 001280 1280      0   0  0
  *   [ 8] .symtab           SYMTAB          00000000 003917 000060 10      9   1  0
  *   [ 9] .strtab           STRTAB          00000000 003977 00001b 00      0   0  0
- *
- *
  * やることは、
  *  - .data, .symtab, .strtab の開始位置をずらす
  *  - セグメント4のサイズを増やす
  *  - .text のサイズを拡張する
+ *
+ *
+ *
+ * セクションヘッダ: (win)
+ * セグメント2
+ * セクション2
+ *
+ * Section Headers:
+ *   [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
+ *   [ 0]                   NULL            00000000 000000 000000 00      0   0  0
+ *   [ 1] .shstrtab         STRTAB          00000000 0000a8 000028 00      0   0  0
+ *   [ 2] .text             PROGBITS        00000000 0005d4 000040 00      0   0  0
+ *   [ 3] .data             PROGBITS        00000000 000614 001280 1280      0   0  0
+ *   [ 4] .symtab           SYMTAB          00000000 001894 000010 10      5   1  0
+ *   [ 5] .strtab           STRTAB          00000000 0018a4 000002 00      0   0  0
+ * やることは、
+ *  - .comment の開始位置をずらす
+ *  - .text のサイズを拡張する
+ *
  *
  */
 static void
@@ -39,8 +67,10 @@ resize_inner_text(struct AIISA_InnerELF *inner, int new_section_size)
     int dsize = new_section_size - text->sh_size;
     unsigned char *new_buffer;
     int new_size;
-    Elf32_Shdr *data, *symtab, *strtab;
-    Elf32_Phdr *seg4;
+    Elf32_Shdr *data, *symtab, *strtab, *comment;
+    Elf32_Phdr *seg4, *seg2;
+
+    printf("dsize1: %d\n", dsize);
 
     if (dsize <= 0) {
         return;
@@ -57,7 +87,6 @@ resize_inner_text(struct AIISA_InnerELF *inner, int new_section_size)
     data = (Elf32_Shdr*)(new_buffer + inner->data_shoff);
     symtab = (Elf32_Shdr*)(new_buffer + inner->symtab_shoff);
     strtab = (Elf32_Shdr*)(new_buffer + inner->strtab_shoff);
-    seg4 = (Elf32_Phdr*)(new_buffer + inner->seg4_phoff);
 
     memcpy(new_buffer + data->sh_offset + dsize,
            inner->data + data->sh_offset, data->sh_size);
@@ -70,8 +99,18 @@ resize_inner_text(struct AIISA_InnerELF *inner, int new_section_size)
     symtab->sh_offset += dsize;
     strtab->sh_offset += dsize;
 
+
+#ifdef _WIN32
+    seg2 = (Elf32_Phdr*)(new_buffer + inner->seg2_phoff);
+
+    seg2->p_memsz += dsize;
+    seg2->p_filesz += dsize;
+#else
+    seg4 = (Elf32_Phdr*)(new_buffer + inner->seg4_phoff);
+
     seg4->p_memsz += dsize;
     seg4->p_filesz += dsize;
+#endif
 
     free(inner->data);
 
@@ -89,6 +128,7 @@ resize_outer_text(struct AIISA_Program *prog, int new_section_size)
     int dsize = new_section_size - text->sh_size;
     unsigned char *new_buffer;
     int new_size;
+    printf("dsize2: %d\n", dsize);
 
     if (dsize <= 0) {
         return;
@@ -150,7 +190,11 @@ write_file(char *path,
 {
     int fd;
 
+#ifdef _WIN32
+    fd = open(path, _O_BINARY|O_WRONLY|O_CREAT|O_TRUNC, 0666);
+#else
     fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+#endif
     write(fd, data, sz);
     close(fd);
 
@@ -185,9 +229,11 @@ setup_inner(struct AIISA_Program *prog)
     Elf32_Ehdr *eh = (Elf32_Ehdr*)base;
     int sh_entsize = eh->e_shentsize;
     unsigned char *text_contents;
+
     int sh_cur = eh->e_shoff;
 
-    sh_cur += sh_entsize * 5;
+    sh_cur += sh_entsize * 6;
+
     prog->outer_text_shdr_offset = sh_cur;
     prog->outer_comment_shdr_offset = sh_cur + sh_entsize;
 
@@ -199,8 +245,11 @@ setup_inner(struct AIISA_Program *prog)
 
         text_contents = base + sh->sh_offset;
 
-        //write_file("out2.elf", text_contents, sh->sh_size);
+        // printf("outer text fileoff=%x\n", prog->outer_text_shdr_offset);
+        // printf("val =%x %s\n", *(int*)(base + 0x1c07), base);
+        // printf("outer text shoff=%d shsize=%d\n", sh->sh_offset, sh->sh_size);
 
+        write_file("out2.elf", text_contents, sh->sh_size);
 
         prog->inner.size = sh->sh_size;
         prog->inner.data = (unsigned char*)malloc(sh->sh_size);
@@ -208,7 +257,19 @@ setup_inner(struct AIISA_Program *prog)
         text_contents = prog->inner.data;
         inner_ehdr = (Elf32_Ehdr*)text_contents;
 
-
+#ifdef _WIN32
+        /*
+         *  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
+         *  [ 0]                   NULL            00000000 000000 000000 00      0   0  0
+         *  [ 1] .shstrtab         STRTAB          00000000 0000a8 000028 00      0   0  0
+         *  [ 2] .text             PROGBITS        00000000 0005d4 000040 00      0   0  0
+         *  [ 3] .data             PROGBITS        00000000 000614 001280 1280      0   0  0
+         *  [ 4] .symtab           SYMTAB          00000000 001894 000010 10      5   1  0
+         *  [ 5] .strtab           STRTAB          00000000 0018a4 000002 00      0   0  0
+         */
+        inner_sh_cur = inner_ehdr->e_shoff;
+        inner_sh_cur += inner_ehdr->e_shentsize * 2;
+#else
         /*        
          *   [ 6] .text             PROGBITS        00000000 00262f 000068 00      0   0  0  (これ)
          *   [ 7] .data             PROGBITS        00000000 002697 001280 1280      0   0  0
@@ -217,12 +278,26 @@ setup_inner(struct AIISA_Program *prog)
          */
         inner_sh_cur = inner_ehdr->e_shoff;
         inner_sh_cur += inner_ehdr->e_shentsize * 6;
+#endif
 
         prog->inner.text_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 0;
         prog->inner.data_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 1;
         prog->inner.symtab_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 2;
         prog->inner.strtab_shoff = inner_sh_cur + inner_ehdr->e_shentsize * 3;;
 
+#ifdef _WIN32
+        /*
+         *   Segment Sections...
+         *    00     
+         *    01     
+         *    02     .text .data .symtab .strtab 
+         */
+
+        inner_ph_cur = inner_ehdr->e_phoff;
+        inner_ph_cur += inner_ehdr->e_phentsize * 2;
+
+        prog->inner.seg2_phoff = inner_ph_cur;
+#else
         /*
          *  00
          *  01
@@ -231,10 +306,12 @@ setup_inner(struct AIISA_Program *prog)
          *  04     .text .data .symtab .strtab
          */
 
+
         inner_ph_cur = inner_ehdr->e_phoff;
         inner_ph_cur += inner_ehdr->e_phentsize * 4;
 
         prog->inner.seg4_phoff = inner_ph_cur;
+#endif
     }
 }
 
@@ -275,7 +352,7 @@ aiisa_build_binary_from_cl(struct AIISA_Program *prog_ret,
         return -1;
     }
 
-    err = clBuildProgram(prog, 1, &dev, "-fbin-exe -fno-bin-llvmir -fno-bin-source -fno-bin-amdil", NULL, NULL);
+    err = clBuildProgram(prog, 1, &dev, "-save-temps -fbin-exe -fno-bin-llvmir -fno-bin-source -fno-bin-amdil", NULL, NULL);
 
     if (err != CL_SUCCESS) {
         char log[1024];
@@ -291,14 +368,15 @@ aiisa_build_binary_from_cl(struct AIISA_Program *prog_ret,
     binary = malloc(binary_sz[0]);
     clGetProgramInfo(prog, CL_PROGRAM_BINARIES, sizeof(binary), &binary, &ret_sz);
 
-    {
-        //write_file("out1.elf", binary, binary_sz[0]);
-    }
-
     prog_ret->size = binary_sz[0];
     prog_ret->cl_binary = binary;
 
     clReleaseProgram(prog);
+
+    {
+        write_file("out1.elf", binary, binary_sz[0]);
+    }
+
     //prog_ret->orig_prog = prog;
 
     setup_inner(prog_ret);
@@ -316,7 +394,7 @@ aiisa_replace_text(struct AIISA_Program *prog,
     resize_inner_text(&prog->inner, code->cur * 4);
 
     inner_text = (Elf32_Shdr*)(prog->inner.data + prog->inner.text_shoff);
-    memcpy(prog->inner.data + inner_text->sh_offset, code->buffer, code->cur * 4);
+    //memcpy(prog->inner.data + inner_text->sh_offset, code->buffer, code->cur * 4);
 
     resize_outer_text(prog, prog->inner.size);
 
@@ -324,10 +402,10 @@ aiisa_replace_text(struct AIISA_Program *prog,
     memcpy(prog->cl_binary + text->sh_offset, prog->inner.data, prog->inner.size);
 
     {
-        //write_file("out3.elf", prog->cl_binary, prog->size);
+        write_file("out3.elf", prog->cl_binary, prog->size);
     }
     {
-        //write_file("out4.elf", prog->inner.data, prog->inner.size);
+        write_file("out4.elf", prog->inner.data, prog->inner.size);
     }
 }
 

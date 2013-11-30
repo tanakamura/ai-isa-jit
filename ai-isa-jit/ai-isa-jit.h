@@ -12,7 +12,11 @@ struct AIISA_InnerELF {
     unsigned char *data;
     int size;
 
+#ifdef _WIN32
+    int seg2_phoff;
+#else
     int seg4_phoff;
+#endif
 
     int text_shoff;
     int data_shoff;

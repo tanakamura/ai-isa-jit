@@ -1,9 +1,23 @@
 #include <stdio.h>
 #include <CL/cl.h>
-#include <getopt.h>
 #include <string.h>
-#include <sys/time.h>
 #include "ai-isa-jit/ai-isa-jit.h"
+
+#ifdef _WIN32
+#include <windows.h>
+
+double
+sec()
+{
+    LARGE_INTEGER freq, val;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&val);
+
+    return val.QuadPart / (double)freq.QuadPart;
+}
+
+#else
+#include <sys/time.h>
 
 double
 sec()
@@ -14,21 +28,28 @@ sec()
 
     return tv.tv_sec + tv.tv_usec/1000000.0;
 }
+#endif
 
 
 static void
 gen_code(struct AIISA_Program *prog, struct AIISA_CodeBuffer *buf)
 {
+    int i;
     aiisa_code_buffer_reset(buf);
 
-    //aiisa_s_endpgm(buf);
+    for (i=0; i<100; i++) {
+        aiisa_v_mov_b32(buf, V(1), 129);
+    }
 
-    aiisa_s_buffer_load_dword_immoff(buf, S(0), S(12), 0x4);
+#if 0
+    aiisa_s_buffer_load_dword_immoff(buf, S(0), S(8), 0x4);
     aiisa_s_waitcnt(buf, LGKMCNT(0));
     aiisa_v_mov_b32(buf, V(0), S(0));
     aiisa_v_mov_b32(buf, V(1), 129);
     aiisa_tbuffer_store_format_x(buf, NFMT_FLOAT, DFMT_32, FLAG_OFFEN, 0,
                                  ZERO, 0, S(4), V(1), V(0));
+#endif
+
     aiisa_s_endpgm(buf);
 
     aiisa_replace_text(prog, buf);
@@ -52,7 +73,7 @@ main(int argc, char **argv)
     struct AIISA_Program prog;
     cl_command_queue queue;
     int ei;
-    int nloop = 16;
+    int nloop = 4;
     struct AIISA_CodeBuffer buf;
 
     aiisa_code_buffer_init(&buf);
@@ -62,24 +83,34 @@ main(int argc, char **argv)
     plat_ids = (cl_platform_id*)malloc(sizeof(*plat_ids) * num);
     clGetPlatformIDs(num, plat_ids, NULL);
 
-    while ((opt = getopt(argc, argv, "n:")) != -1) {
-        switch (opt) {
-        case 'n':
-            run_size = atoi(optarg);
+    int argidx = 1;
+    while (1) {
+        if (argidx >= argc) {
             break;
+        }
 
-        default:
-            puts("usage : run in.cl");
-            return 1;
+        if (argv[argidx][0] == '-') {
+            switch (argv[argidx][1]) {
+            case 'n':
+                run_size = atoi(argv[argidx+1]);
+                argidx += 2;
+                break;
+
+            default:
+                puts("usage : run in.cl");
+                return 1;
+            }
+        } else {
+            break;
         }
     }
 
-    if (optind >= argc) {
+    if (argidx >= argc) {
         puts("usage : run in.cl");
         return 1;
     }
 
-    input = argv[optind];
+    input = argv[argidx];
 
     for (i=0; i<(int)num; i++) {
         char name[1024];
@@ -129,12 +160,15 @@ main(int argc, char **argv)
     aiisa_build_binary_from_cl(&prog, context, gpu_devs[0], input);
 
     for (ei=0; ei<nloop; ei++) {
+        static const int lsize [] = {1, 16, 64, 256};
+
         cl_program cl_prog;
         const unsigned char *bin[1];
         size_t bin_size[1];
         cl_kernel ker;
         cl_mem in, out;
         size_t global_size[3];
+        size_t local_size[3];
         double tb, te;
 
         tb = sec();
@@ -167,15 +201,16 @@ main(int argc, char **argv)
             int *ptr = (int*)clEnqueueMapBuffer(queue, out, CL_TRUE, CL_MAP_WRITE, 0, run_size*sizeof(int), 0, NULL, NULL, NULL);
             int i;
             for (i=0; i<run_size; i++) {
-                ptr[i] = 0xdeadbeef;
+                ptr[i] = 0;
             }
             clEnqueueUnmapMemObject(queue, out, ptr, 0, NULL, NULL);
         }
 
         err = clFinish(queue);
 
-        global_size[0] = run_size;
-        err = clEnqueueNDRangeKernel(queue, ker, 1, NULL, global_size, NULL, 0, NULL, NULL);
+        global_size[0] = lsize[ei] * 2;
+        local_size[0] = lsize[ei];
+        err = clEnqueueNDRangeKernel(queue, ker, 1, NULL, global_size, local_size, 0, NULL, NULL);
         if (err != CL_SUCCESS) {
             puts("enqueue nd");
         }
